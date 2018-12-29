@@ -1,301 +1,249 @@
-# import neccesities
+# import libraries
 import math
 import random
 import copy
 
+import helper
+
 import numpy as np
+import networkx as nx
 
 import matplotlib.pyplot as plt
+import matplotlib.tri as mtri
 from matplotlib import collections, colors
 from mpl_toolkits import mplot3d
 from mpl_toolkits.mplot3d import axes3d, proj3d
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from scipy.spatial import ConvexHull, SphericalVoronoi
+from collections import deque, namedtuple
 
-# set constants
-NPOINTS = 1000
-RADIUS = 4000
-CENTER = np.array([0, 0, 0])
-NPLATES = 5
-
-# generate gridlines
-phi = np.linspace(0, np.pi, 20)
-theta = np.linspace(0, 2 * np.pi, 40)
-x = np.outer(np.sin(theta) * np.sqrt(RADIUS), np.cos(phi) * np.sqrt(RADIUS))
-y = np.outer(np.sin(theta) * np.sqrt(RADIUS), np.sin(phi) * np.sqrt(RADIUS))
-z = np.outer(np.cos(theta) * np.sqrt(RADIUS), np.ones_like(phi) * np.sqrt(RADIUS))
-
-# normalization function
-def normalize(points, radius):
-    points /= np.linalg.norm(points, axis=0)
-    return points * radius
-
-# generate points function
-def test_1():
-    # generate NPOINTS random points and normalize
-    points = np.random.randn(3, NPOINTS)
-    points = normalize(points, RADIUS)
+# world object 
+class World(object):
     
-    # resort points
-    points = np.array(list(zip(points[0], points[1], points[2])))
-    
-    # find_centroid function
-    def find_centroid(vertices):
-        x = np.mean([vertex[0] for vertex in vertices])
-        y = np.mean([vertex[1] for vertex in vertices])
-        z = np.mean([vertex[2] for vertex in vertices])
-        return [x, y, z]
+    # defaults
+    plate_colors = [
+        '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', 
+        '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', 
+        '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', 
+        '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080', 
+        '#ffffff', '#3a3a3a'
+    ]
 
-    # perform voronoi iteration
-    def relaxation(points, num_iter):
-        relaxed, sv = points, SphericalVoronoi(points, RADIUS, CENTER)
-        while num_iter > 0:
-            relaxed = np.array([normalize(find_centroid(sv.vertices[region]), RADIUS) for region in sv.regions])
-            sv = SphericalVoronoi(relaxed, RADIUS, CENTER)
-            num_iter -= 1
-        return sv.points, sv
+    def pick_plate_color(self):
+        if len(self.plate_colors) > 0:
+            color = random.choice(self.plate_colors)
+            self.plate_colors.remove(color)
+            return color
 
-    # run relaxation 20 times
-    points, sv = relaxation(points, 20)
-    sv.sort_vertices_of_regions()
-
-    # compute convex hull of spherical points
-    hull = ConvexHull(points)
-
-    # combine convex hull and spherical voronoi data into combined class
-
-    # grab simplices from convex hull
-    simplices = hull.simplices[:]
-
-    # we use lists (implemented as arrays) as the information is static
-    # each element is a list containing indices of neighbors
-    nodes_primitives = [set() for i in range(NPOINTS)]
-    for simplex in simplices:
-        nodes_primitives[simplex[0]].update([simplex[1], simplex[2]])
-        nodes_primitives[simplex[1]].update([simplex[0], simplex[2]])
-        nodes_primitives[simplex[2]].update([simplex[0], simplex[1]])
-
-    # to increase performance of random fill, create data structure
-    # combine both convex hull and spherical voronoi
     class Node(object):
-        __slots__ = ('label', 'neighbors', 'rogue')
+        __slots__ = ('label', 'point', 'neighbors', 'is_rogue', 'region_vertices', 'movement')
 
-        def __init__(self, label):
+        def __init__ (self, label):
             self.label = label
+            self.point = np.zeros(3)
             self.neighbors = []
-            self.rogue = True
+            self.is_rogue = True
+            self.region_vertices = []
+            self.movement = np.zeros(3)
         
-        def __repr__(self):
-            # return str(self.label)
-            return "{label: " + str(self.label) + ", neighbors: " + str([node.label for node in self.neighbors]) + ", rogue: " + str(self.rogue) + "}"
-
         def has_rogue_neighbor(self):
             for n in self.neighbors:
-                if n.rogue:
+                if n.is_rogue:
                     return True
             return False
+        
+        def __repr__(self):
+            return  "{label: " + str(self.label) + \
+                    ", neighbors: " + str([node.label for node in self.neighbors]) + \
+                    ", rogue: " + str(self.is_rogue) + "}"
 
-    # create empty node classes for each node
-    nodes = [Node(i) for i in range(NPOINTS)]
-
-    # fill data accordingly
-    for node, node_primitive in zip(nodes, nodes_primitives):
-        for neighbor in node_primitive:
-            node.neighbors.append(nodes[neighbor])
-    
-
-    # create plates data structure
     class Plate(object):
-        __slots__ = ('label', 'growable', 'nodes')
+        __slots__ = ('label', 'start', 'is_growable', 'nodes', 'centroid')
 
         def __init__(self, label):
             self.label = label
-            self.growable = True
+            self.start = None
+            self.is_growable = True
             self.nodes = set()
+            self.centroid = np.zeros(3)
+        
+        def update_growable(self):
+            self.is_growable = False
+            for node in self.nodes:
+                if node.has_rogue_neighbor():
+                    self.is_growable = True
         
         def __repr__(self):
-            return "{label: " + str(self.label) + ", growable: " + str(self.growable) + ", nodes: " + str([n.label for n in self.nodes]) + "}"
+            return  "{label: " + str(self.label) + \
+                    ", growable: " + str(self.is_growable) + \
+                    ", nodes: " + str([n.label for n in self.nodes]) + "}"
+
+    def __init__(
+            self, npoints=200, radius=4000,
+            center=np.zeros(3), nplates=10,
+            degree_of_relaxation=5
+        ):
+        # world attributes
+        self.npoints = npoints
+        self.radius = radius
+        self.degree_of_relaxation = degree_of_relaxation
+        self.center = center
+        self.nplates = nplates
+
+        # world data
+        self.nodes = []
+        self.plates = []
+
+    def generate(self):
+        self.__generate_nodes()
+        self.__generate_plates()
+
+    def __generate_nodes(self):
+        # generate points
+        points = np.random.randn(3, self.npoints)
+        points = helper.normalize(points, self.radius)
         
-        def is_growable(self):
-            return len([node for node in self.nodes if node.has_rogue_neighbor()]) > 0
-
-    plates = [Plate(i) for i in range(NPLATES)]
-    usable_plates = plates
-    unassigned_nodes = nodes
-
-    # allocate a random starting location
-    for plate in plates:
-
-        # sample start node
-        start = random.sample(unassigned_nodes,k=1)[0]
-
-        # remove start node from unassigned
-        unassigned_nodes.remove(start)
-
-        # set rogue to false
-        start.rogue = False
-
-        # add start node to plate
-        plate.nodes.add(start)
-
-    # perform random fill
-    iter_number = 0 
-    while len(usable_plates) > 0:
-        # print('####################################################################')
-        # print("Usable plates:", [p.label for p in usable_plates])
-        # print("Usable nodes:", [n.label for n in unassigned_nodes])
-        # print("Iteration:", iter_number)
-        
-        # select growable plate
-        plate = random.choice(usable_plates)
-        # print("Chosen plate:", plate)
-        
-        # create temp list with nodes with valid neighbors
-        usable_fill_froms = [node for node in plate.nodes if node.has_rogue_neighbor()]
-        # print("Usable fill froms:", [node.label for node in usable_fill_froms])
-
-        # select random node from temp list and select neighbor from node
-        fill_from = random.sample(usable_fill_froms,k=1)[0]
-        # print("Fill from:", fill_from)
-
-        # create temp list with rogue nodes
-        usable_nodes = [node for node in fill_from.neighbors if node.rogue]
-        added_node = random.sample(usable_nodes,k=1)[0]
-        # print("Added node:", added_node)
-        # print("Added node neighbors:")
-        # for neighbor in added_node.neighbors:
-        #     print(neighbor, added_node.label in [n.label for n in neighbor.neighbors])
-
-        # remove added node from neighbors and unassigned
-        unassigned_nodes.remove(added_node)
-
-        # set rogue to false
-        added_node.rogue = False
-        
-        # add added node to plate
-        plate.nodes.add(added_node)
-        
-        iter_number += 1
-
-        for p in usable_plates:
-            p.growable = p.is_growable()
-        usable_plates = [p for p in usable_plates if p.growable]
-
-    plate_num = 0
-    fig, ax = plt.subplots(NPLATES, 1, figsize=(25, NPLATES * 25), subplot_kw={'projection':'3d', 'aspect':'equal'})
-
-    for plate in plates:     
-        
-        ax[plate_num].plot_wireframe(x, y, z, alpha=0.2, color='k', rstride=1, cstride=1)
-
-        random_color = colors.rgb2hex(np.random.rand(3))
-        indices = [n.label for n in plate.nodes]
-        for i in range(len(indices)):
-            point = sv.points[indices[i]]
-            region = sv.regions[indices[i]]
-
-            ax[plate_num].scatter(point[0], point[1], point[2], s=50, c=random_color)
-            polygon = Poly3DCollection([sv.vertices[region]], alpha=0.7)
-            polygon.set_color(random_color)
-            ax[plate_num].add_collection3d(polygon)
-
-        plate_num += 1
+        # resort points
+        points = np.array(list(zip(points[0], points[1], points[2])))
     
-    fig.savefig('foo_1.pdf')
+        # relax points
+        points, sv = helper.relax(points, self.radius, self.center, self.degree_of_relaxation)
+        sv.sort_vertices_of_regions()
 
-    plt.close()
+        # compute convex hull
+        hull = ConvexHull(points)
 
-def test_2():
-    # generate NPOINTS random points and normalize
-    points = np.random.randn(3, NPOINTS)
-    points = normalize(points, RADIUS)
+        # use siplices to determine neighbors using temporary lists
+        primitive_nodes = [set() for i in range(self.npoints)]
+
+        for simplex in hull.simplices:
+            primitive_nodes[simplex[0]].update([simplex[1], simplex[2]])
+            primitive_nodes[simplex[1]].update([simplex[0], simplex[2]])
+            primitive_nodes[simplex[2]].update([simplex[0], simplex[1]])
+
+        # use node class to construct representative data structure
+        self.nodes = [World.Node(i)  for i in range(self.npoints)]
+
+        for point, node in zip(points, self.nodes):
+            node.point = point
+
+        # fill data accordingly
+        for node, primitive_node in zip(self.nodes, primitive_nodes):
+            for neighbor in primitive_node:
+                node.neighbors.append(self.nodes[neighbor])            
+
+        self.sv = sv
     
-    # resort points
-    points = np.array(list(zip(points[0], points[1], points[2])))
-    
-    # find_centroid function
-    def find_centroid(vertices):
-        x = np.mean([vertex[0] for vertex in vertices])
-        y = np.mean([vertex[1] for vertex in vertices])
-        z = np.mean([vertex[2] for vertex in vertices])
-        return [x, y, z]
+    def __generate_plates(self):
+        # TODO: Possibly implement probability distribution weighted by distance from center?
+        # Possibly implement breadth first search algo
 
-    # perform voronoi iteration
-    def relaxation(points, num_iter):
-        relaxed, sv = points, SphericalVoronoi(points, RADIUS, CENTER)
-        while num_iter > 0:
-            relaxed = np.array([normalize(find_centroid(sv.vertices[region]), RADIUS) for region in sv.regions])
-            sv = SphericalVoronoi(relaxed, RADIUS, CENTER)
-            num_iter -= 1
-        return sv.points, sv
+        # use plates class to construct representative data structure
+        self.plates = [World.Plate(i) for i in range(self.nplates)]
 
-    # run relaxation 20 times
-    points, sv = relaxation(points, 20)
-    sv.sort_vertices_of_regions()
+        # create list for sampling
+        unassigned_nodes = self.nodes[:]
 
-    # compute convex hull of spherical points
-    hull = ConvexHull(points)
+        # for each plate, allocate a random starting location
+        for plate in self.plates:
 
-    # combine convex hull and spherical voronoi data into combined class
+            # sample start node
+            start = random.choice(unassigned_nodes)      
 
-    # grab simplices from convex hull
-    simplices = hull.simplices[:]
-
-    # we use lists (implemented as arrays) as the information is static
-    # each element is a list containing indices of neighbors
-    nodes_primitives = [set() for i in range(NPOINTS)]
-    for simplex in simplices:
-        nodes_primitives[simplex[0]].update([simplex[1], simplex[2]])
-        nodes_primitives[simplex[1]].update([simplex[0], simplex[2]])
-        nodes_primitives[simplex[2]].update([simplex[0], simplex[1]])
-
-    # create plates data structure
-    plates = [set() for i in range(NPLATES)]
-    unassigned_nodes = set(range(NPOINTS))
-
-    # allocate a random starting location
-    for plate in plates:
-        start = random.sample(unassigned_nodes,k=1)[0]
-        unassigned_nodes.remove(start)
-        plate.add(start)
-
+            # remove start node from unassigned and set rogue to false
+            # add node to plate
+            unassigned_nodes.remove(start)
+            start.is_rogue = False
+            plate.nodes.add(start)
+            plate.start = start
         
-    # perform random fill
-    while len(unassigned_nodes) > 0:
-        added_node = None
-        plate = None
-        while added_node not in unassigned_nodes:
-            plate = random.choice(plates)
-            added_node = None
-            fill_from = random.sample(plate,k=1)[0]
-            added_node = random.sample(nodes_primitives[fill_from],k=1)[0]
-        plate.add(added_node)
-        unassigned_nodes.remove(added_node)
+        # create list of growable plates
+        growable_plates = self.plates[:]
+
+        # random fill until no plates can grow further
+        while len(growable_plates) > 0:
+
+            # sample plate
+            plate = random.choice(growable_plates)
+
+            # create sample list of nodes with valid neighbors
+            fill_from = random.choice([node for node in plate.nodes if node.has_rogue_neighbor()])
+            added_node = random.choice([node for node in fill_from.neighbors if node.is_rogue])
+            
+            # remove node from sample list and edit accordingly
+            unassigned_nodes.remove(added_node)
+            added_node.is_rogue = False
+            plate.nodes.add(added_node)
+
+            # update list of growable plates
+            for p in growable_plates:
+                p.update_growable()
+            growable_plates = [p for p in growable_plates if p.is_growable]
+        
+        # Assign 2-vector to center of tectonic plate and
+        # compute change of vector tangent to the surface of the sphere
+        for plate in self.plates:
+
+            # grab starting point
+            point = plate.start.point
+
+            # generate vector orthonormal to point
+            vec = np.random.randn(3)
+            vec -= vec.dot(point) * point / np.linalg.norm(point) ** 2
+            vec /= np.linalg.norm(vec)
+            vec *= (self.radius / 10)
+
+            # set movement to vector
+            plate.start.movement = vec
+            
+
+        # Assign continental and oceanic status plate or sample base height of plate from normal distribution
+
+    def plot(self):
+        phi = np.linspace(0, np.pi, 20)
+        theta = np.linspace(0, 2 * np.pi, 40)
+        grid_x = np.outer(np.sin(theta) * np.sqrt(self.radius * 1.001), np.cos(phi) * np.sqrt((self.radius * 1.001)))
+        grid_y = np.outer(np.sin(theta) * np.sqrt(self.radius * 1.001), np.sin(phi) * np.sqrt((self.radius * 1.001)))
+        grid_z = np.outer(np.cos(theta) * np.sqrt(self.radius * 1.001), np.ones_like(phi) * np.sqrt((self.radius * 1.001)))
+
+
+        corner_points = np.array([
+            [self.radius*0.7, self.radius*0.7, self.radius*0.7], [self.radius*0.7, -self.radius*0.7, self.radius*0.7], [-self.radius*0.7, self.radius*0.7, self.radius*0.7], [-self.radius*0.7, -self.radius*0.7, self.radius*0.7],
+            [self.radius*0.7, self.radius*0.7, -self.radius*0.7], [self.radius*0.7, -self.radius*0.7, -self.radius*0.7], [-self.radius*0.7, self.radius*0.7, -self.radius*0.7], [-self.radius*0.7, -self.radius*0.7, -self.radius*0.7]
+        ])
+        fig, ax = plt.subplots(1, 1, figsize=(15, 15), subplot_kw={'projection':'3d', 'aspect':'equal'})
+
+        # hide gridlines and labels
+        ax.grid(False)
+        plt.axis('off')
+
+        ax.plot_wireframe(grid_x, grid_y, grid_z, alpha=0.0, color='k', rstride=1, cstride=1)
+        ax.scatter(corner_points[:,0], corner_points[:,1], corner_points[:,2], alpha=0.0)        
+
+        for plate in self.plates: 
+            random_color = self.pick_plate_color()
+            indices = [n.label for n in plate.nodes]
+            for index in indices:
+                region = self.sv.regions[index]
+                polygon = Poly3DCollection([self.sv.vertices[region]], facecolors=random_color, edgecolors='k')
+                ax.add_collection3d(polygon)
+            point = plate.start.point * 1.01
+            vec = plate.start.movement
+            ax.scatter(point[0], point[1], point[2], c='r', s=10)
+            ax.quiver(point[0], point[1], point[2], vec[0], vec[1], vec[2])
+            
+        for angle in range(360):
+            ax.view_init(30, angle)
+            plt.draw()
+            plt.pause(.001)
+      
+            
+if __name__ == "__main__":
+    w = World()
+    w.generate()
+    w.plot()
+        
+
+
     
-    plate_num = 0
-    fig, ax = plt.subplots(NPLATES, 1, figsize=(25, NPLATES * 25), subplot_kw={'projection':'3d', 'aspect':'equal'})
-
-    for plate in plates:
-        ax[plate_num].plot_wireframe(x, y, z, alpha=0.2, color='k', rstride=1, cstride=1)
-        random_color = colors.rgb2hex(np.random.rand(3))
-        indices = list(plate)
-        for i in range(len(indices)):
-            point = sv.points[indices[i]]
-            region = sv.regions[indices[i]]
-
-            ax[plate_num].scatter(point[0], point[1], point[2], s=50, c=random_color)
-            polygon = Poly3DCollection([sv.vertices[region]], alpha=0.7)
-            polygon.set_color(random_color)
-            ax[plate_num].add_collection3d(polygon)
-
-        plate_num += 1
-
-    fig.savefig('foo_2.pdf')
-
-if __name__ == '__main__':
-    import timeit
-    print(timeit.timeit(test_1, number=1))
-    print(timeit.timeit(test_2, number=1))
-
-
-
+        

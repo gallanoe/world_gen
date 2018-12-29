@@ -75,6 +75,9 @@ class World(object):
         # compute convex hull
         hull = ConvexHull(points)
 
+        for simplex in hull.simplices:
+            
+
     def generate(self):
         self.__generate_regions()
 
