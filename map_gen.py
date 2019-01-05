@@ -133,7 +133,7 @@ class World(object):
                 node.neighbors.append(self.nodes[neighbor])            
 
         self.sv = sv
-    
+
     def __generate_plates(self):
         # TODO: Possibly implement probability distribution weighted by distance from center?
         # Possibly implement breadth first search algo

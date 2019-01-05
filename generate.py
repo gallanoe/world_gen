@@ -16,15 +16,7 @@ from mpl_toolkits.mplot3d import axes3d, proj3d
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from scipy.spatial import ConvexHull, SphericalVoronoi
 from collections import deque, namedtuple
-
-class TectonicPlate(nx.Graph):
-    """ TectonicPlate object structure, represented by a graph with additional attributes and methods """
-    
-    def __init__(self, id):
-        self.id = id
-        self.regions = nx.Graph()
-
-
+from itertools import combinations
 
 class World(object):
     """  World object with set parameters and generator """
@@ -57,29 +49,117 @@ class World(object):
         self.degrees_of_relaxation = degrees_of_relaxation
 
         # world data
-        self.regions = []
-        self.structure = nx.Graph()
-        self.plates = [nx.Graph() for i in range(self.nplates)]
+        self.region_vertices = None
+        self.regions = nx.Graph()
+        self.regions.add_nodes_from(list(range(self.npoints)))
 
+        self.plates = nx.Graph()
 
     def __generate_regions(self):
         
         # generate points
-        points = np.random.randn(self.npoints, 3)
+        points = np.random.randn(3, self.npoints)
         points = helper.normalize(points, self.radius)
+
+        # resort points
+        points = np.array(list(zip(points[0], points[1], points[2])))
 
         # relax points
         points, sv = helper.relax(points, self.radius, self.center, self.degrees_of_relaxation)
         sv.sort_vertices_of_regions()
 
+        # add points to world data
+        for node, point in zip(self.regions.nodes(), points):
+            self.regions.nodes[node]['point'] = point
+
         # compute convex hull
         hull = ConvexHull(points)
 
+        # use networkx graph structure and fill data accordingly
         for simplex in hull.simplices:
+            for u, v in combinations([0, 1, 2], 2):
+                self.regions.add_edge(simplex[u], simplex[v])
+        
+        # copy data from spherical voronoi (before deletion)
+        self.region_vertices = sv.vertices[:]
+        for node, region in zip(self.regions, sv.regions):
+            self.regions.nodes[node]['vertices'] = region[:]
+
+        for point, vertices, data in zip(points, sv.regions, self.regions.nodes.data()):
+            print("Point:", point)
+            print("Vertices:", vertices)
+            print("Data:", data)
             
+        del hull
+        del sv
+        
+    def __generate_plates(self):
+
+        # define helper functios relevent to plate generation 
+        def __has_rogue_neighbor(self, region):
+            for neighbor in self.regions.neighbors(region):
+                if self.regions.nodes[neighbor]['is_rogue']:
+                    return True
+            return False
+        
+        def __is_growable(self, plate):
+            for node in plate.nodes:
+                if self.__has_rogue_neighbor(node):
+                    return True
+            return False
+
+        # generate default plates
+        self.plates.add_nodes_from(list(range(self.nplates)))
+        
+        # generate and use list of indices
+        unassigned_regions = list(range(self.npoints))
+
+        """
+        TODO: RETHINK PLATE ARCHITECTURE
+        Ideas:
+            (1) seems to be the best option
+
+            1.) add region property that identifies region node belongs to - also create multidimensional array
+            according to plates and regions for ease of access (O(1) access) 
+                Pros: No data redundancies - ease of access - all node searches are simply dependent on a single Graph object
+                Cons: None to think of
+            
+            2.) 
+        """
+
+        # assigned starter plate
+        for plate in self.plates.nodes:
+
+            # add subgraph
+            plate['subgraph'] = nx.Graph()
+
+            # sample and removed from unassigned
+            start = random.choice(unassigned_regions)
+            unassigned_regions.remove(start)
+
+            # fill and sort data accordingly
+            plate['start'] = start
+            plate[](start)
+            self.regions.nodes[start]['is_rogue'] = False
+
+            # also set default values for each plate
+            plate['is_growable'] = True
+            plate['color'] = self.pick_plate_color()
+
+        # generate duplicate graphs with associated depth dependent on start of each node
+        growable_plates = self.plates[:]
+        
+        
+            
+
+        
+        
+                
+
 
     def generate(self):
         self.__generate_regions()
+        self.__generate_plates()
 
 if __name__ == '__main__':
     w = World()
