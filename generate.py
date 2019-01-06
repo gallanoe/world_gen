@@ -15,7 +15,7 @@ from mpl_toolkits import mplot3d
 from mpl_toolkits.mplot3d import axes3d, proj3d
 from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 from scipy.spatial import ConvexHull, SphericalVoronoi
-from collections import deque, namedtuple
+from collections import deque, namedtuple, OrderedDict
 from itertools import combinations
 
 class World(object):
@@ -53,8 +53,6 @@ class World(object):
         self.regions = nx.Graph()
         self.regions.add_nodes_from(list(range(self.npoints)))
 
-        self.plates = nx.Graph()
-
     def __generate_regions(self):
         
         # generate points
@@ -79,20 +77,21 @@ class World(object):
         for simplex in hull.simplices:
             for u, v in combinations([0, 1, 2], 2):
                 self.regions.add_edge(simplex[u], simplex[v])
+
+        # check neighbor data
+        # for node in self.regions.nodes:
+        #     print("N:", node, "Neighbors:", list(self.regions.neighbors(node)))
         
         # copy data from spherical voronoi (before deletion)
         self.region_vertices = sv.vertices[:]
         for node, region in zip(self.regions, sv.regions):
             self.regions.nodes[node]['vertices'] = region[:]
 
-        for point, vertices, data in zip(points, sv.regions, self.regions.nodes.data()):
-            print("Point:", point)
-            print("Vertices:", vertices)
-            print("Data:", data)
-            
-        del hull
-        del sv
-        
+        # check vertex data
+        # for point, vertices, data in zip(points, sv.regions, self.regions.nodes.data()):
+        #     print("V:", vertices)
+        #     print("D:", data)
+
     def __generate_plates(self):
 
         # define helper functios relevent to plate generation 
@@ -108,12 +107,6 @@ class World(object):
                     return True
             return False
 
-        # generate default plates
-        self.plates.add_nodes_from(list(range(self.nplates)))
-        
-        # generate and use list of indices
-        unassigned_regions = list(range(self.npoints))
-
         """
         TODO: RETHINK PLATE ARCHITECTURE
         Ideas:
@@ -127,27 +120,96 @@ class World(object):
             2.) 
         """
 
-        # assigned starter plate
-        for plate in self.plates.nodes:
+        # time to implement architecture
 
-            # add subgraph
-            plate['subgraph'] = nx.Graph()
+        # generate default plates
+        self.plates = [{'nodes': set()} for _ in range(self.nplates)]
 
-            # sample and removed from unassigned
-            start = random.choice(unassigned_regions)
-            unassigned_regions.remove(start)
+        # generate starting spots
+        unassigned_regions = set(range(self.npoints))
 
-            # fill and sort data accordingly
+        for plate in self.plates:
+            start = random.sample(unassigned_regions, 1)[0]
             plate['start'] = start
-            plate[](start)
-            self.regions.nodes[start]['is_rogue'] = False
+            plate['nodes'].add(start)
+            unassigned_regions.remove(start)
+        
+        # create traversal for each plate
+        # probably temporary code
 
-            # also set default values for each plate
-            plate['is_growable'] = True
-            plate['color'] = self.pick_plate_color()
+        # we're gonna have to create our own BFS!!!!!!
+        def bfs_search(graph, source):
 
-        # generate duplicate graphs with associated depth dependent on start of each node
+            graph_copy = copy.deepcopy(graph)
+            for node in graph_copy.nodes:
+                graph_copy.nodes[node]['visited'] = False
+            graph_copy.nodes[source]['visited'] = True
+
+            queue = [source]
+            traversal = []
+
+            while queue:
+                s = queue.pop(0)
+                traversal.append(s)
+                neighbors = graph_copy.neighbors(s)
+                for n in neighbors:
+                    if not graph_copy.nodes[n]['visited']:
+                        queue.append(n)
+                        graph_copy.nodes[n]['visited'] = True
+            
+            return traversal
+
+        self.bfs_search = bfs_search
+        for plate in self.plates:
+
+            # generate reverse bfs
+            reverse_bfs = [(node, None) for node in bfs_search(self.regions, plate['start'])][1:]
+            # construct ordered dict with key as entry - O(1) pop
+            # using ordered dict as ordered set
+            plate['bfs'] = OrderedDict(reverse_bfs)
+
+        # remove starts of other plates from other bfs'
+        for plate in self.plates:
+            for other_plate in self.plates:
+                if other_plate['start'] in plate['bfs']:
+                    del plate['bfs'][other_plate['start']]
+                
+        # make copy of list but keep references  
         growable_plates = self.plates[:]
+
+        # random bfs fill
+        while len(unassigned_regions) > 0:
+            # select random plate
+            plate = random.choice(growable_plates)
+            # print(plate)
+
+            # select node based on bfs
+            added_node = plate['bfs'].popitem()[0]
+            plate['nodes'].add(added_node)
+
+            # remove node from other bfs' to ensure they are not added again
+            for other_plate in self.plates:
+                try:
+                    del other_plate['bfs'][added_node]
+                except:
+                    pass
+
+                # remove plates from growable if no more plates to add
+                if len(other_plate['bfs']) <= 0 and other_plate in growable_plates:
+                    growable_plates.remove(other_plate)
+            
+            # remove added node from unassigned nodes
+            unassigned_regions.remove(added_node)   
+
+
+
+
+        # for plate in self.plates:
+        #     print(plate)
+                
+        
+
+        
         
         
             
@@ -160,6 +222,8 @@ class World(object):
     def generate(self):
         self.__generate_regions()
         self.__generate_plates()
+
+
 
 if __name__ == '__main__':
     w = World()
