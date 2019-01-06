@@ -225,25 +225,38 @@ class World(object):
             indices = [n.label for n in plate.nodes]
             for index in indices:
                 region = self.sv.regions[index]
-                polygon = Poly3DCollection([self.sv.vertices[region]], facecolors=random_color, edgecolors='k')
+                vertices = [self.sv.vertices[region]]
+                polygon = Poly3DCollection(vertices, facecolors=random_color, edgecolors='k')
                 ax.add_collection3d(polygon)
             point = plate.start.point * 1.01
             vec = plate.start.movement
             ax.scatter(point[0], point[1], point[2], c='r', s=10)
             ax.quiver(point[0], point[1], point[2], vec[0], vec[1], vec[2])
-            
-        for angle in range(360):
-            ax.view_init(30, angle)
-            plt.draw()
-            plt.pause(.001)
-      
-            
-if __name__ == "__main__":
-    w = World()
+
+
+def generate_world(n):
+    w = World(npoints=n)
     w.generate()
     w.plot()
-        
 
+def gen500():
+    generate_world(500)
+
+def gen1000():
+    generate_world(1000)
+
+def gen2000():
+    generate_world(2000)
+
+def gen5000():
+    generate_world(5000)
+
+if __name__ == "__main__":
+    import timeit
+    print("Primitives on 500:", timeit.timeit(gen500, number=1))
+    print("Primitives on 1000:", timeit.timeit(gen1000, number=1))
+    print("Primitives on 2000:", timeit.timeit(gen2000, number=1))
+    print("Primitives on 5000:", timeit.timeit(gen5000, number=1))
 
     
         

@@ -93,20 +93,6 @@ class World(object):
         #     print("D:", data)
 
     def __generate_plates(self):
-
-        # define helper functios relevent to plate generation 
-        def __has_rogue_neighbor(self, region):
-            for neighbor in self.regions.neighbors(region):
-                if self.regions.nodes[neighbor]['is_rogue']:
-                    return True
-            return False
-        
-        def __is_growable(self, plate):
-            for node in plate.nodes:
-                if self.__has_rogue_neighbor(node):
-                    return True
-            return False
-
         """
         TODO: RETHINK PLATE ARCHITECTURE
         Ideas:
@@ -117,13 +103,18 @@ class World(object):
                 Pros: No data redundancies - ease of access - all node searches are simply dependent on a single Graph object
                 Cons: None to think of
             
-            2.) 
+            NOTES:
+                seems like we're going to have to run traversal with each iteration
+                luckily, we only run it on the plate selected
         """
 
         # time to implement architecture
+        # add default plate for each node
+        for node in self.regions.nodes():
+            self.regions.nodes[node]['plate'] = None
 
         # generate default plates
-        self.plates = [{'nodes': set()} for _ in range(self.nplates)]
+        self.plates = [{'id': i, 'nodes': set()} for i in range(self.nplates)]
 
         # generate starting spots
         unassigned_regions = set(range(self.npoints))
@@ -133,46 +124,48 @@ class World(object):
             plate['start'] = start
             plate['nodes'].add(start)
             unassigned_regions.remove(start)
+            self.regions.nodes[start]['plate'] = plate['id']
         
         # create traversal for each plate
         # probably temporary code
 
         # we're gonna have to create our own BFS!!!!!!
-        def bfs_search(graph, source):
-
-            graph_copy = copy.deepcopy(graph)
-            for node in graph_copy.nodes:
-                graph_copy.nodes[node]['visited'] = False
-            graph_copy.nodes[source]['visited'] = True
-
-            queue = [source]
-            traversal = []
-
-            while queue:
-                s = queue.pop(0)
-                traversal.append(s)
-                neighbors = graph_copy.neighbors(s)
-                for n in neighbors:
-                    if not graph_copy.nodes[n]['visited']:
-                        queue.append(n)
-                        graph_copy.nodes[n]['visited'] = True
+        # returns next node in traversal of subgraph determined
+        # by union of source's plate and default plate 
+        # that has plate value of None
+        def __return_bfs_succ(source):
             
-            return traversal
+            # assert that source can not have plate of None
+            assert(self.regions.nodes[source]['plate'] is not None)
 
-        self.bfs_search = bfs_search
-        for plate in self.plates:
+            # copy graph as to not edit original graph
+            graph = self.regions
+            for node in graph.nodes():
+                graph.nodes[node]['visited'] = False
 
-            # generate reverse bfs
-            reverse_bfs = [(node, None) for node in bfs_search(self.regions, plate['start'])][1:]
-            # construct ordered dict with key as entry - O(1) pop
-            # using ordered dict as ordered set
-            plate['bfs'] = OrderedDict(reverse_bfs)
+            # set source has visited (we are starting from there)
+            graph.nodes[source]['visited'] = True
 
-        # remove starts of other plates from other bfs'
-        for plate in self.plates:
-            for other_plate in self.plates:
-                if other_plate['start'] in plate['bfs']:
-                    del plate['bfs'][other_plate['start']]
+            # get source plate id
+            pid = graph.nodes[source]['plate']
+
+            # start queue
+            queue = [source]
+
+            # iterate through queue
+            while queue:
+                # grab first element and return if plate value is None
+                s = queue.pop(0)
+                if graph.nodes[s]['plate'] is None:
+                    return s
+                # else iterate through neighbors
+                for n in self.regions.neighbors(s):
+                    if graph.nodes[n]['plate'] is None:
+                        return n
+                    elif graph.nodes[n]['plate'] == pid and not graph.nodes[n]['visited']:
+                        queue.append(n)
+                        graph.nodes[n]['visited'] = True        
+            return None
                 
         # make copy of list but keep references  
         growable_plates = self.plates[:]
@@ -181,51 +174,74 @@ class World(object):
         while len(unassigned_regions) > 0:
             # select random plate
             plate = random.choice(growable_plates)
-            # print(plate)
-
-            # select node based on bfs
-            added_node = plate['bfs'].popitem()[0]
-            plate['nodes'].add(added_node)
-
-            # remove node from other bfs' to ensure they are not added again
-            for other_plate in self.plates:
-                try:
-                    del other_plate['bfs'][added_node]
-                except:
-                    pass
-
-                # remove plates from growable if no more plates to add
-                if len(other_plate['bfs']) <= 0 and other_plate in growable_plates:
-                    growable_plates.remove(other_plate)
             
-            # remove added node from unassigned nodes
-            unassigned_regions.remove(added_node)   
-
-
-
-
-        # for plate in self.plates:
-        #     print(plate)
-                
-        
-
-        
-        
-        
+            # grab the next node to add 
+            added_node = __return_bfs_succ(plate['start'])
             
-
+            # if added_node is None then plate is not growable 
+            # remove plate from pool and select new
+            if added_node is None:
+                growable_plates.remove(plate)
+            else:
+                # add node and set associated data accordingly
+                plate['nodes'].add(added_node)
+                unassigned_regions.remove(added_node)   
+                self.regions.nodes[added_node]['plate'] = plate['id']
         
-        
-                
-
 
     def generate(self):
         self.__generate_regions()
         self.__generate_plates()
 
+    def plot(self):
+        phi = np.linspace(0, np.pi, 20)
+        theta = np.linspace(0, 2 * np.pi, 40)
+        grid_x = np.outer(np.sin(theta) * np.sqrt(self.radius * 1.001), np.cos(phi) * np.sqrt((self.radius * 1.001)))
+        grid_y = np.outer(np.sin(theta) * np.sqrt(self.radius * 1.001), np.sin(phi) * np.sqrt((self.radius * 1.001)))
+        grid_z = np.outer(np.cos(theta) * np.sqrt(self.radius * 1.001), np.ones_like(phi) * np.sqrt((self.radius * 1.001)))
 
 
-if __name__ == '__main__':
-    w = World()
+        corner_points = np.array([
+            [self.radius*0.7, self.radius*0.7, self.radius*0.7], [self.radius*0.7, -self.radius*0.7, self.radius*0.7], [-self.radius*0.7, self.radius*0.7, self.radius*0.7], [-self.radius*0.7, -self.radius*0.7, self.radius*0.7],
+            [self.radius*0.7, self.radius*0.7, -self.radius*0.7], [self.radius*0.7, -self.radius*0.7, -self.radius*0.7], [-self.radius*0.7, self.radius*0.7, -self.radius*0.7], [-self.radius*0.7, -self.radius*0.7, -self.radius*0.7]
+        ])
+        fig, ax = plt.subplots(1, 1, figsize=(15, 15), subplot_kw={'projection':'3d', 'aspect':'equal'})
+
+        ax.grid(False)
+        plt.axis('off')
+
+        ax.scatter(corner_points[:,0], corner_points[:,1], corner_points[:,2], alpha=0.0) 
+
+        for node in self.regions.nodes.data():
+            
+            # draw vertices
+
+            vertex_indices = node[1]['vertices']
+            vertices = [self.region_vertices[vertex_index] for vertex_index in vertex_indices]
+            polygon = Poly3DCollection([vertices], facecolors=World.__plate_colors[node[1]['plate']], edgecolors='k')
+            ax.add_collection3d(polygon)
+
+
+def generate_world(n):
+    w = World(npoints=n)
     w.generate()
- 
+    w.plot()
+
+def gen500():
+    generate_world(500)
+
+def gen1000():
+    generate_world(1000)
+
+def gen2000():
+    generate_world(2000)
+
+def gen5000():
+    generate_world(5000)
+
+if __name__ == "__main__":
+    import timeit
+    print("NetworkX on 500:", timeit.timeit(gen500, number=1))
+    print("NetworkX on 1000:", timeit.timeit(gen1000, number=1))
+    print("NetworkX on 2000:", timeit.timeit(gen2000, number=1))
+    print("NetworkX on 5000:", timeit.timeit(gen5000, number=1))
