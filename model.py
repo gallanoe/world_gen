@@ -50,11 +50,21 @@ class Plate:
         """
         Create a plate object.
         """
+        # assert that id is int as to allow for indexing into adjacency matrix and regions list
+        assert(type(id) is int)
         self.id = id                 
         self.source = Region.null       
         self.nodes = set()
-        self.color = '#e6194b' # TODO: determine default color - use random generator or helper function?
+        self.color = helper.pick_plate_color() # TODO: determine default color - use random generator or helper function?
         Plate.plates.add(self)
+
+    def __repr__(self):
+        """
+        Returns "{ id: self.id, source: self.source, nodes: [self.nodes.id] }
+        """
+        return  "{ id: " + str(self.id) + \
+                ", source: " + str(self.source) + \
+                ", nodes: " + str([node.id for node in self.nodes]) + "}"
 
 class Region:
     """
@@ -97,6 +107,8 @@ class Region:
         Creates a region object. All parameters but id are set to default values. Created \
             object is added to set-type class variable Region.regions.
         """
+        # assert id is int as to allow indexing into list of plates
+        assert(type(id) is int)
         self.id = id
         self.centroid = np.zeros(3)
         self.region_vertices = np.zeros((3,3))
@@ -111,7 +123,7 @@ class Region:
         """
         return  "{ id: " + str(self.id) + \
                 ", centroid: " + str(self.centroid) + \
-                ", neighbors: " + str([neighbor.id for neighbor in self.neighbors]) + " }"
+                ", neighbors: " + str(self.neighbors) + " }"
                 # ", plate: " + str(self.plate.id) + " }"
 
 class World():
@@ -155,7 +167,10 @@ class World():
         self.use_bfs = use_bfs
 
         # world data
-        self.regions = []
+        self.regions = [] 
+        # adding an adjacency matrix might cause a bit of data redundancy, wasting space and time
+        # needed to compute BFS however, and might be useful in later portions of the generation algorithm
+        self.region_structure = {}
         self.plates = []
 
     def generate(self):
@@ -199,12 +214,20 @@ class World():
         
         # fill neighbor data accordingly
         for region, primitive_region in zip(self.regions, primitive_regions):
-            for neighbor in primitive_region:
-                region.neighbors.add(self.regions[neighbor])
-        
+            region.neighbors.update(primitive_region)
+
+        # fill matrix data
+        # as the graph is undirected, we will be using a hash-table (dict) 
+        # where the keys are unique pairs of regions (nodes)
+
+        for u, v in combinations(list(range(self.nregions)), 2):
+            self.region_structure[(u,v)] = 0
+            if v in self.regions[u].neighbors:
+                self.region_structure[(u,v)] = 1
+
         # fill region vertices data
         for region, sv_region in zip(self.regions, sv.regions):
-            region.region_vertices = [sv.vertices[index] for index in sv_region]
+            region.region_vertices = np.array([sv.vertices[index] for index in sv_region])
 
         del sv
         del hull
@@ -242,43 +265,120 @@ class World():
 
         # bfs fill algorithm
         if self.use_bfs:
+
+            # construct table of visited nodes - one copy for reuse 
+            visited_table = dict([(i, False) for i in range(self.nregions)])
+
             def find_bfs_successor(plate):
-                
+
+                # assert plate is passed as parameter with valid source
                 assert(type(plate) is Plate)
-                source = plate.source
+                assert(type(plate.source) is Region)
 
+                # reset visited table
+                for v in visited_table:
+                    visited_table[v] = False
 
+                # initiate queue for traversal
+                queue = [plate.source.id]
+
+                while queue:
+                    # grab first element and return if plate value is null
+                    s = self.regions[queue.pop(0)]
+                    if s.plate is Plate.null:
+                        return s
+                    # else iterate through neighbors
+                    for n in s.neighbors:
+                        # retrieve region object
+                        r = self.regions[n]
+                        # if n's plate value is null, return
+                        if r.plate is Plate.null:
+                            return r
+                        elif r.plate is plate and not visited_table[n]:
+                            queue.append(n)             
+                            visited_table[n] = True             
                 # return the null region if no such successor found
                 return Region.null
 
             # perform random fill using bfs
-            while len(growable_plates > 0) and len(unassigned_regions > 0):
+            while len(growable_plates) > 0 and len(unassigned_regions) > 0:
                 
                 # sample palte
                 plate = random.choice(growable_plates)
 
-            
-            if len(growable_plates > 0) or len(unassigned_regions > 0):
+                # find node to add using find_bfs_successor
+                # if Region.null returned, remove plate from sampling pool
+                added_node = find_bfs_successor(plate)
+                if added_node is Region.null:
+                    growable_plates.remove(plate)
+                else:
+                    # add node and set data accordingly
+                    plate.nodes.add(added_node)
+                    unassigned_regions.remove(added_node)
+                    added_node.plate = plate
+
+            if len(growable_plates) > 0 or len(unassigned_regions) > 0:
                 print("Yeah, you fucked up somewhere.")
+                print("len(growable_plates):", len(growable_plates), "len(unassigned_regions):", len(unassigned_regions))
+                if len(growable_plates) > 0:
+                    print("Still growable plates:")
+                    for plate in growable_plates:
+                        print(plate)
+                if len(unassigned_regions) > 0:
+                    print("Unassigned regions:")
+                    for region in unassigned_regions:
+                        print(region)
                 return
         # randomized fill algorithm
         else:
             # perform random fill using bfs
-            while len(growable_plates > 0) and len(unassigned_regions > 0):
+            while len(growable_plates) > 0 and len(unassigned_regions) > 0:
                 
                 # sample palte
                 plate = random.choice(growable_plates)
 
             
-            if len(growable_plates > 0) or len(unassigned_regions > 0):
+            if len(growable_plates) > 0 or len(unassigned_regions) > 0:
                 print("Yeah, you fucked up somewhere.")
                 return
+
+    def plot(self):
+        phi = np.linspace(0, np.pi, 20)
+        theta = np.linspace(0, 2 * np.pi, 40)
+        grid_x = np.outer(np.sin(theta) * np.sqrt(self.radius * 1.001), np.cos(phi) * np.sqrt((self.radius * 1.001)))
+        grid_y = np.outer(np.sin(theta) * np.sqrt(self.radius * 1.001), np.sin(phi) * np.sqrt((self.radius * 1.001)))
+        grid_z = np.outer(np.cos(theta) * np.sqrt(self.radius * 1.001), np.ones_like(phi) * np.sqrt((self.radius * 1.001)))
+
+
+        corner_points = np.array([
+            [self.radius*0.7, self.radius*0.7, self.radius*0.7], [self.radius*0.7, -self.radius*0.7, self.radius*0.7], [-self.radius*0.7, self.radius*0.7, self.radius*0.7], [-self.radius*0.7, -self.radius*0.7, self.radius*0.7],
+            [self.radius*0.7, self.radius*0.7, -self.radius*0.7], [self.radius*0.7, -self.radius*0.7, -self.radius*0.7], [-self.radius*0.7, self.radius*0.7, -self.radius*0.7], [-self.radius*0.7, -self.radius*0.7, -self.radius*0.7]
+        ])
+        fig, ax = plt.subplots(1, 1, figsize=(15, 15), subplot_kw={'projection':'3d', 'aspect':'equal'})
+
+        # hide gridlines and labels
+        ax.grid(False)
+        plt.axis("off")
+        
+        ax.scatter(corner_points[:,0], corner_points[:,1], corner_points[:,2], alpha=0.0) 
+
+        for plate in self.plates:
+            print(plate.color)       
+
+        for region in self.regions:
+            vertices = region.region_vertices
+            print(vertices)
+            polygon = Poly3DCollection(vertices, facecolors=region.plate.color, edgecolors='k')
+            ax.add_collection3d(polygon)
+
+        plt.show()
 
 
 
 
 
 if __name__ == "__main__":
-    w = World()
+    w = World(nregions=200)
     w.generate()
+
         

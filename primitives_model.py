@@ -96,7 +96,7 @@ class World(object):
 
     def generate(self):
         self.__generate_nodes()
-        self.__generate_plates()
+        # self.__generate_plates()
 
     def __generate_nodes(self):
         # generate points
@@ -226,6 +226,7 @@ class World(object):
             for index in indices:
                 region = self.sv.regions[index]
                 vertices = [self.sv.vertices[region]]
+                print("Vertices:", vertices)
                 polygon = Poly3DCollection(vertices, facecolors=random_color, edgecolors='k')
                 ax.add_collection3d(polygon)
             point = plate.start.point * 1.01
@@ -252,11 +253,15 @@ def gen5000():
     generate_world(5000)
 
 if __name__ == "__main__":
-    import timeit
-    print("Primitives on 500:", timeit.timeit(gen500, number=1))
-    print("Primitives on 1000:", timeit.timeit(gen1000, number=1))
-    print("Primitives on 2000:", timeit.timeit(gen2000, number=1))
-    print("Primitives on 5000:", timeit.timeit(gen5000, number=1))
+    w = World()
+    w.generate()
+    w.plot()
+
+    # import timeit
+    # print("Primitives on 500:", timeit.timeit(gen500, number=1))
+    # print("Primitives on 1000:", timeit.timeit(gen1000, number=1))
+    # print("Primitives on 2000:", timeit.timeit(gen2000, number=1))
+    # print("Primitives on 5000:", timeit.timeit(gen5000, number=1))
 
     
         

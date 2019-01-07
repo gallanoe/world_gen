@@ -1,4 +1,5 @@
 import numpy as np
+import random
 from scipy.spatial import ConvexHull, SphericalVoronoi
 
 def normalize(p, r):
@@ -28,14 +29,14 @@ __plate_colors = [
     '#ffffff', '#3a3a3a'
 ]
 
-def pick_plate_color(self):
+def pick_plate_color():
     """ 
     Simple function for picking unique and distinct color for plates. 
     Will exhaust after number of plate colors calls.
     """ 
-    if len(self.__plate_colors) > 0:
-        color = random.choice(self.__plate_colors)
-        self.__plate_colors.remove(color)
+    if len(__plate_colors) > 0:
+        color = random.choice(__plate_colors)
+        __plate_colors.remove(color)
         return color
 
 #######################################
