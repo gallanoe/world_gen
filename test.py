@@ -62,20 +62,43 @@ def skip_func(functions):
             print("SKIPPING")
             print()
 
+import random
+
+def test_choice(a):
+    assert(type(a) is list)
+    choice = random.choice(a)
+    a.remove(choice)
+    return choice
+
+def test_sample(a):
+    assert(type(a) is set)
+    choice = random.sample(a, 1)[0]
+    a.remove(choice)
+    return choice
+
 if __name__ == "__main__":
 
 	# time to fully test primitives
-	xx = np.array([100, 250, 500, 750, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000])
-	yy = []
-	for x in xx:
-		y = timeit.timeit(stmt="primitives_generate_world({})".format(x), setup="from __main__ import primitives_generate_world", number=1)
-		print("Testing primitives", x, ":", y)
-		yy.append(y)
-	yy = np.array(yy)
-	print("xx:", xx)
-	print("yy:", yy)
+	# xx = np.array([100, 250, 500, 750, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000])
+	# yy = []
+	# for x in xx:
+	# 	y = timeit.timeit(stmt="primitives_generate_world({})".format(x), setup="from __main__ import primitives_generate_world", number=1)
+	# 	print("Testing primitives", x, ":", y)
+	# 	yy.append(y)
+	# yy = np.array(yy)
+	# print("xx:", xx)
+	# print("yy:", yy)
 
-	fig, ax = plt.subplots(1, 1, figsize=(15, 15))
-	ax.scatter(xx, yy)
-	plt.show()
+	# fig, ax = plt.subplots(1, 1, figsize=(15, 15))
+	# ax.scatter(xx, yy)
+	# plt.show()
+
+    
+    choice_time = timeit.timeit(stmt="test_choice(arr)", setup="from __main__ import test_choice\narr = list(range(100000))", number=100)
+    sample_time = timeit.timeit(stmt="test_sample(arr)", setup="from __main__ import test_sample\narr = set(list(range(100000)))", number=100)
+    print("random.choice:", choice_time)
+    print("random.sample:", sample_time)
+    
+
+
 

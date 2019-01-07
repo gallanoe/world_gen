@@ -220,6 +220,8 @@ class World(object):
             vertices = [self.region_vertices[vertex_index] for vertex_index in vertex_indices]
             polygon = Poly3DCollection([vertices], facecolors=World.__plate_colors[node[1]['plate']], edgecolors='k')
             ax.add_collection3d(polygon)
+        
+        plt.show()
 
 
 def generate_world(n):
@@ -240,8 +242,6 @@ def gen5000():
     generate_world(5000)
 
 if __name__ == "__main__":
-    import timeit
-    print("NetworkX on 500:", timeit.timeit(gen500, number=1))
-    print("NetworkX on 1000:", timeit.timeit(gen1000, number=1))
-    print("NetworkX on 2000:", timeit.timeit(gen2000, number=1))
-    print("NetworkX on 5000:", timeit.timeit(gen5000, number=1))
+    w = World(npoints=10000)
+    w.generate()
+    w.plot()

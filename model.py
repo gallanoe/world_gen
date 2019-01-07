@@ -24,7 +24,7 @@ class Plate:
     ----------
     id : the label used to identify the plate
 
-    start : reference to Region object. The region object referred to is the source plate \
+    source : reference to Region object. The region object referred to is the source plate \
         used for breadth-first search of region structure when performing probabilistic fill.
     
     nodes : a set of references to Region objects. \
@@ -41,21 +41,20 @@ class Plate:
     Plate.plates : a set of references to Plate objects that keeps track of all \
         created Plate objects
     """
-    __slots__ = ('id', 'start', 'nodes')
+    __slots__ = ('id', 'source', 'nodes', 'color')
     
     null = None
     plates = set()
 
-    def __init__(self, id=len(Plate.plates)):
+    def __init__(self, id=len(plates)):
         """
         Create a plate object.
         """
         self.id = id                 
-        self.start = Region.null       
+        self.source = Region.null       
         self.nodes = set()
         self.color = '#e6194b' # TODO: determine default color - use random generator or helper function?
-
-    
+        Plate.plates.add(self)
 
 class Region:
     """
@@ -87,13 +86,13 @@ class Region:
     Region.regions : a set of references to Region objects that keeps track of all \
         created Region objects
     """
-    __slots__ = ('id', 'centroid', 'region_vertex_indices', 'neighbors', 'plate', 'movement')
+    __slots__ = ('id', 'centroid', 'region_vertices', 'neighbors', 'plate', 'movement')
     
     null = None
     regions = set()
 
 
-    def __init__(self, id=len(Region.regions)):
+    def __init__(self, id=len(regions)):
         """
         Creates a region object. All parameters but id are set to default values. Created \
             object is added to set-type class variable Region.regions.
@@ -104,57 +103,182 @@ class Region:
         self.neighbors = set()
         self.plate = Plate.null
         self.movement = np.zeros(3)
+        Region.regions.add(self)
 
     def __repr__(self):
         """
         Returns "{ id: self.id, neighbors: [neighbors.id], plate: self.plate }
         """
         return  "{ id: " + str(self.id) + \
-                ", neighbors: " + str([neighbor.id for neighbor in self.neighbors]) + \
-                ", plate: " + str(self.plate.id) + " }"
+                ", centroid: " + str(self.centroid) + \
+                ", neighbors: " + str([neighbor.id for neighbor in self.neighbors]) + " }"
+                # ", plate: " + str(self.plate.id) + " }"
 
 class World():
     """  
     World object with set parameters and generator
+
+    Attributes
+    ----------
+    nregions : number of regions composing the world. Default is 200 (number used for testing)
+
+    radius : radius of the world. Default is 4000 (radius of the Earth)
+    
+    nplates : number of plates composing the world. Default is 10
+
+    degrees_of_relaxation : number of runs of Lloyd's algorithm applied to regions to equalize \
+        area distribution of each region Default is 5
+
+    use_bfs : bool value that determines whether the plate generation algorithm \
+        uses a BFS successor finder as added node instead of sampling from pool
+
+    regions : a set-type of references to Region objects 
+
+    plates : a set-type of references to Plate objects
     """
 
-    #######################################
-    # keeping old code for reference later
-    #######################################
-    __plate_colors = [
-        '#e6194b', '#3cb44b', '#ffe119', '#4363d8', '#f58231', 
-        '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', '#fabebe', 
-        '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', 
-        '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080', 
-        '#ffffff', '#3a3a3a'
-    ]
-
-    def pick_plate_color(self):
-        """ 
-        Simple function for picking unique and distinct color for plates. 
-        Will exhaust after number of plate colors calls.
-        """ 
-        if len(self.__plate_colors) > 0:
-            color = random.choice(self.__plate_colors)
-            self.__plate_colors.remove(color)
-            return color
-
-    #######################################
-    # keeping old code for reference later
-    #######################################    
         
     def __init__(
-            self, npoints=200, radius=4000,
-            center=np.zeros(3), nplates=10,
-            degrees_of_relaxation=5
+            self, nregions=200, radius=4000,
+            nplates=10, degrees_of_relaxation=5,
+            use_bfs=True
         ):
+        """
+        Creates a World object with set parameters. Nothing will be generated yet.
+        """
         # world attributes
-        self.npoints = npoints
+        self.nregions = nregions
         self.radius = radius
-        self.center = center
+        self.center = np.zeros(3)
         self.nplates = nplates
         self.degrees_of_relaxation = degrees_of_relaxation
+        self.use_bfs = use_bfs
 
         # world data
-        self.region_vertices = None
-        self.regions = 
+        self.regions = []
+        self.plates = []
+
+    def generate(self):
+        """
+        Runs generation using generation settings determined by World attributes. \
+        Will override previously generated data.
+        """
+        self.__generate_regions()
+        self.__generate_plates()
+    
+    def __generate_regions(self):
+        """
+        Algorithm for generating regions.
+        """
+
+        # randomly generate points for regions
+        points = np.random.randn(3, self.nregions)
+        points = helper.normalize(points, self.radius)
+
+        # resort points
+        points = np.array(list(zip(points[0], points[1], points[2])))
+
+        # relax points and compute spherical voronoi
+        points, sv = helper.relax(points, self.radius, self.center, self.degrees_of_relaxation)
+        sv.sort_vertices_of_regions()
+
+        # compute convex hull
+        hull = ConvexHull(points)
+
+        # use simplices to determine neighbors and store using temporary data structure
+        primitive_regions = [[] for i in range(self.nregions)]
+        for simplex in hull.simplices:
+            primitive_regions[simplex[0]].extend([simplex[1], simplex[2]])
+            primitive_regions[simplex[1]].extend([simplex[0], simplex[2]])
+            primitive_regions[simplex[2]].extend([simplex[0], simplex[1]])
+        
+        # use region class to construct representative data structure
+        self.regions = [Region(i) for i in range(self.nregions)]
+        for point, region in zip(points, self.regions):
+            region.centroid = point
+        
+        # fill neighbor data accordingly
+        for region, primitive_region in zip(self.regions, primitive_regions):
+            for neighbor in primitive_region:
+                region.neighbors.add(self.regions[neighbor])
+        
+        # fill region vertices data
+        for region, sv_region in zip(self.regions, sv.regions):
+            region.region_vertices = [sv.vertices[index] for index in sv_region]
+
+        del sv
+        del hull
+  
+    def __generate_plates(self):
+        
+        # use Plate class to construct representative data structure
+        self.plates = [Plate(i) for i in range(self.nplates)]
+
+        # create duplicate list of regions of sampling
+        # keep in mind that list + random.choice is faster than set + random.sample
+        unassigned_regions = self.regions[:]
+
+        # for each plate allocate a random starting location
+        for plate in self.plates:
+
+            # sample starting node
+            source = random.choice(unassigned_regions)
+
+            # remove start node from sample pool
+            unassigned_regions.remove(source)
+
+            # set data attributes accordingly
+            plate.source = source
+            source.plate = plate
+
+            plate.nodes.add(source)
+
+        # create set of growable plates
+        growable_plates = self.plates[:]
+
+        # create custom bfs successor finder
+        # searched for specific successor that belongs to no plate
+        # that succeeds only nodes from the same plate
+
+        # bfs fill algorithm
+        if self.use_bfs:
+            def find_bfs_successor(plate):
+                
+                assert(type(plate) is Plate)
+                source = plate.source
+
+
+                # return the null region if no such successor found
+                return Region.null
+
+            # perform random fill using bfs
+            while len(growable_plates > 0) and len(unassigned_regions > 0):
+                
+                # sample palte
+                plate = random.choice(growable_plates)
+
+            
+            if len(growable_plates > 0) or len(unassigned_regions > 0):
+                print("Yeah, you fucked up somewhere.")
+                return
+        # randomized fill algorithm
+        else:
+            # perform random fill using bfs
+            while len(growable_plates > 0) and len(unassigned_regions > 0):
+                
+                # sample palte
+                plate = random.choice(growable_plates)
+
+            
+            if len(growable_plates > 0) or len(unassigned_regions > 0):
+                print("Yeah, you fucked up somewhere.")
+                return
+
+
+
+
+
+if __name__ == "__main__":
+    w = World()
+    w.generate()
+        
