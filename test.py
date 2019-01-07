@@ -1,26 +1,24 @@
-import timeit
-
 import networkx_model as nx_model
 import primitives_model as pr_model
-
+import timeit
 
 def networkx_test():
-	def generate_world(n):
-		w = nx_model.World(npoints=n)
-		w.generate()
-		w.plot()
+    def generate_world(n):
+        w = nx_model.World(npoints=n)
+        w.generate()
+        w.plot()
 
-	def gen500():
-		generate_world(500)
+    def gen500():
+        generate_world(500)
 
-	def gen1000():
-		generate_world(1000)
+    def gen1000():
+        generate_world(1000)
 
     def gen2000():
-		generate_world(2000)
+        generate_world(2000)
 
     def gen5000():
-		generate_world(5000)
+        generate_world(5000)
 
     print("NetworkX on 500:", timeit.timeit(gen500, number=1))
     print("NetworkX on 1000:", timeit.timeit(gen1000, number=1))
@@ -29,21 +27,21 @@ def networkx_test():
     
 def primitives_test():
     def generate_world(n):
-		w = pr_model.World(npoints=n)
-		w.generate()
-		w.plot()
+        w = pr_model.World(npoints=n)
+        w.generate()
+        w.plot()
 
     def gen500():
-		generate_world(500)
+        generate_world(500)
 
     def gen1000():
-		generate_world(1000)
+        generate_world(1000)
 
     def gen2000():
-		generate_world(2000)
+        generate_world(2000)
 
     def gen5000():
-		generate_world(5000)
+        generate_world(5000)
 
     print("Primitives on 500:", timeit.timeit(gen500, number=1))
     print("Primitives on 1000:", timeit.timeit(gen1000, number=1))
@@ -52,13 +50,12 @@ def primitives_test():
 
 def skip_func(functions):
     for func in functions:
-		try:
-			func()
-		except KeyboardInterrupt:
-			print()
-			print("SKIPPING")
-			print()
+        try:
+            func()
+        except KeyboardInterrupt:
+            print()
+            print("SKIPPING")
+            print()
 
 if __name__ == "__main__":
- 	for i in range(10):
-		print("Hello World!")
+	skip_func([networkx_test, primitives_test])
